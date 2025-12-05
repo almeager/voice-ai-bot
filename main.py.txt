@@ -1,0 +1,78 @@
+import os
+import telebot
+import openai
+import tempfile
+from telebot.types import Message
+
+# -------------------------------
+# Read Tokens from Environment
+# -------------------------------
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+openai.api_key = OPENAI_API_KEY
+
+
+# -------------------------------------
+# 1) استقبال صوت المستخدم من تليجرام
+# -------------------------------------
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message: Message):
+    try:
+        file_info = bot.get_file(message.voice.file_id)
+        file_path = file_info.file_path
+
+        # تنزيل ملف الصوت مؤقتًا
+        downloaded = bot.download_file(file_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as f:
+            f.write(downloaded)
+            temp_path = f.name
+
+        # -----------------------------
+        # 2) تحويل الصوت لنص (Whisper)
+        # -----------------------------
+        audio_file = open(temp_path, "rb")
+        transcript = openai.audio.transcriptions.create(
+            model="gpt-4o-mini-tts",
+            file=audio_file
+        )
+
+        text = transcript.text
+
+        # -----------------------------
+        # 3) تحليل النص + النبرة
+        # -----------------------------
+        analysis_prompt = f"""
+        قم بتحليل الصوت والنبرة والنص التالي:
+
+        النص: {text}
+
+        أريد:
+        • درجة التوتر (0-100)
+        • الطاقة النفسية
+        • ملامح الانفعال
+        • ملخص الحالة
+        • نصيحة قصيرة
+        """
+
+        gpt_resp = openai.chat.completions.create(
+            model="gpt-4.1",
+            messages=[
+                {"role": "system", "content": "أنت محلل صوت ونبرة محترف جداً."},
+                {"role": "user", "content": analysis_prompt},
+            ]
+        )
+
+        result = gpt_resp.choices[0].message['content']
+
+        # إرسال التقرير للمستخدم
+        bot.send_message(message.chat.id, f"🎧 **تحليل الصوت:**\n\n{result}", parse_mode="Markdown")
+
+    except Exception as e:
+        bot.send_message(message.chat.id, "⚠️ حدث خطأ أثناء تحليل الصوت.")
+        print("Error:", e)
+
+
+# تشغيل البوت
+bot.polling(none_stop=True)
