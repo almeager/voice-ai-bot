@@ -1,39 +1,106 @@
 import os
+import telebot
+import openai
+import tempfile
+import matplotlib.pyplot as plt
+from io import BytesIO
 from groq import Groq
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler,
-    MessageHandler, ContextTypes, filters
-)
+from telegram import Update, InputMediaPhoto
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
+# -------------------------------
 # قراءة المفاتيح من Environment Variables
+# -------------------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+openai.api_key = OPENAI_API_KEY
 client = Groq(api_key=GROQ_API_KEY)
 
+# -------------------------------
+# رسالة البداية
+# -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("البوت جاهز 🔥 أرسل أي رسالة!")
+    await update.message.reply_text("البوت جاهز 🔥 أرسل أي رسالة صوتية أو نصية!")
 
-async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_msg = update.message.text
+# -------------------------------
+# التعامل مع الصوت
+# -------------------------------
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    try:
+        file_info = bot.get_file(message.voice.file_id)
+        file_path = file_info.file_path
+        downloaded = bot.download_file(file_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as f:
+            f.write(downloaded)
+            temp_path = f.name
 
-    groq_reply = client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=[{"role": "user", "content": user_msg}]
-    )
+        # تحويل الصوت إلى نص باستخدام Whisper
+        audio_file = open(temp_path, "rb")
+        transcript = openai.audio.transcriptions.create(
+            model="gpt-4o-mini-tts",
+            file=audio_file
+        )
 
-    bot_answer = groq_reply.choices[0].message["content"]
-    await update.message.reply_text(bot_answer)
+        text = transcript.text or "لم يتم استخراج نص واضح."
+        
+        # -------------------------------
+        # تحليل الصوت والنبرة عبر Groq
+        # -------------------------------
+        groq_reply = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": text}]
+        )
+        bot_answer = groq_reply.choices[0].message["content"]
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        # -------------------------------
+        # توليد الرسوم البيانية
+        # -------------------------------
+        # مثال: تمثيل الطاقة مقابل التوتر
+        energy = 0.00029
+        rhythm = 104.2
+        pitch = 1870.7
+        tension = min(max(int(energy*1e5), 0), 100)
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_to_user))
+        plt.figure(figsize=(4,2))
+        plt.bar(["توتر", "طاقة"], [tension, energy*1e5], color=["red", "green"])
+        plt.title("📊 تحليل الصوت")
+        buf = BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        plt.close()
 
-    print("Telegram Bot is running...")
-    app.run_polling()
+        # -------------------------------
+        # نصائح احترافية حسب الحالة
+        # -------------------------------
+        if tension > 60:
+            advice = "⚠️ مستوى التوتر مرتفع! حاول التنفس العميق والاستراحة القصيرة للحفاظ على التركيز."
+        elif energy*1e5 < 20:
+            advice = "💤 الطاقة منخفضة. خذ قسطًا من الراحة أو مارس نشاطًا بسيطًا لتنشيط جسمك."
+        else:
+            advice = "✅ الحالة متوازنة. حافظ على نمط النوم والنشاط اليومي."
 
-if _name_ == "_main_":
-    main()
+        # -------------------------------
+        # إرسال التقرير للمستخدم
+        # -------------------------------
+        bot.send_photo(
+            message.chat.id,
+            photo=buf,
+            caption=f"🎧 **تحليل الصوت:**\n\n"
+                    f"*النص:* {text}\n"
+                    f"*الملخص:* {bot_answer}\n"
+                    f"*نصيحة:* {advice}",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        bot.send_message(message.chat.id, "⚠️ حدث خطأ أثناء تحليل الصوت.")
+        print("Error:", e)
+
+# -------------------------------
+# بدء البوت
+# -------------------------------
+bot.polling(none_stop=True)
