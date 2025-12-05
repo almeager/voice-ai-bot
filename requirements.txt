@@ -1,3 +1,7 @@
 python-telegram-bot==20.7
+pyTelegramBotAPI
+openai
 groq
 flask
+matplotlib
+pydub
