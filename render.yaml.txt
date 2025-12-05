@@ -1,12 +1,12 @@
 services:
-  - type: worker
-    name: voice-ai-bot
+  - type: web
+    name: telegram-groq-bot
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
     plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
-      - key: 8347811800:AAFUqN88lkSdi3OhsoRbXAu7Zu08TJS3G-c
+      - key: TELEGRAM_TOKEN
         sync: false
-      - key: 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
+      - key: GROQ_API_KEY
         sync: false
